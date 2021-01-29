@@ -2,7 +2,6 @@
 # Yelp Search
 
 
-
 import time, json, requests
 from bs4 import BeautifulSoup
 
@@ -12,12 +11,12 @@ from bs4 import BeautifulSoup
 
 
 """
-  Read the Yelp API Key from file.
+  Read the Yelp API key from file
 
   Args:
-    filepath (string): File containing API Key
+    filepath (string): file containing API Key
   Returns:
-    api_key (string): The API Key
+    api_key (string): Yelp API key for authentication
 """
 def read_api_key(filepath):
   with open(filepath, 'r') as f:
@@ -30,10 +29,10 @@ def read_api_key(filepath):
   Return the raw HTML at the specified URL.
 
   Args:
-    url (string):
+    url (string): URL to get html code from
 
   Returns:
-    status_code (integer):
+    status_code (integer): status of the request (200: successful, 404: not found)
     raw_html (string): the raw HTML content of the response, properly encoded according to the HTTP headers.
 """
 def retrieve_html(url):
@@ -49,16 +48,17 @@ def retrieve_html(url):
 
   Args:
     url (string): API endpoint url
-    headers (dict): A python dictionary containing HTTP headers including Authentication to be sent
+    headers (dict): A python dictionary containing HTTP headers including authentication to be sent
     url_params (dict): The parameters (required and optional) supported by endpoint
 
   Returns:
-    results (json): response as json
+    content_json (dictionary): response from request as dictionary
 """
 def api_get_request(url, headers, url_params):
   http_method = 'GET'
-  # See requests.request?
+  # send request and store results (Response object) in response
   response = requests.get(url, params = url_params, headers = headers)
+  # get response as dictionary
   content_json = response.json()
   return content_json
 
@@ -69,16 +69,17 @@ def api_get_request(url, headers, url_params):
 
   Args:
     url_addition(string): ending of Yelp API endpoint URL
-    api_key(string): Yelp API key for accessing the API
+    api_key(string): Yelp API key for authentication
     **kwargs: additional arguments needed pulling data from api
-  returns:
+
+  Returns:
     (list): list of tuple
       url(string): API endpoint URL
       headers(dict): headers needed for accessing the Yelp API
       url_params(dict): other parameters needing for getting data (such as location, restaurant name, etc.)
 """
 def get_url_params(url_addition, api_key, **kwargs):
-  # url endpoint for search
+  # url endpoint for search + url addition (for search all businesses, search reviews of certain business, etc)
   url = 'https://api.yelp.com/v3/businesses' + url_addition
 
   # authentication
@@ -99,21 +100,22 @@ def get_url_params(url_addition, api_key, **kwargs):
 
 
 """
-  Make an authenticated request to the Yelp API.
+  Get at most 20 businesses based on location.
 
   Args:
-    api_key (string): Your Yelp API Key for Authentication
-    location (string): Business Location
-    offset (int): param for pagination
+    api_key (string): Yelp API key for authentication
+    location (string): business Location
+    offset (int): parameter for pagination
 
   Returns:
     total (integer): total number of businesses on Yelp corresponding to the location
-    businesses (list): list of dicts representing each business
+    businesses (list): list representing each business
 """
-def yelp_search(api_key, loc, off = 0):
-  #url, headers, url_params = location_search_params(api_key = my_api_key, location = loc, offset = off)
-  url, headers, url_params = get_url_params('/search', api_key, location = loc, offset = off)
+def yelp_search(api_key, location, offset = 0):
+  # get url, headers, and URL parameters for request
+  url, headers, url_params = get_url_params('/search', api_key, location = location, offset = offset)
 
+  # send request and get results as a dictionary
   response_json = api_get_request(url, headers, url_params)
   return response_json["total"], list(response_json["businesses"])
 
@@ -121,22 +123,26 @@ def yelp_search(api_key, loc, off = 0):
 
 
 """
-  Returns a list of tuples (url, headers, url_params) for paginated search of all restaurants
+  Returns a list of tuples (url, headers, url_params) for paginated search of all restaurants.
+  Paginated to stop timeout due to too many Yelp API requests.
+
   Args:
-    api_key (string): Your Yelp API Key for Authentication
+    api_key (string): Yelp API key for authentication
     location (string): Business Location
     total (int): Total number of items to be fetched
+
   Returns:
     results (list): list of tuple (url, headers, url_params)
 """
 def paginated_restaurant_search_requests(api_key, location, total):
-  pages = [] # add result to page
+  pages = [] # add result to pages
 
-  offset_ = 0
-  while offset_ < total:
-    url, headers, url_params = get_url_params('/search', api_key, location, offset = offset_, limit = 20, categories = "restaurants")
+  current_offset = 0
+  while current_offset < total:
+    url, headers, url_params = get_url_params('/search', api_key, location, offset = current_offset, limit = 20, categories = "restaurants")
     pages.append((url, headers, url_params))
-    offset_ = offset_ + 20
+    current_offset = current_offset + 20
+    # slight pause to stop too many requests to Yelp API
     time.sleep(.3)
 
   return pages
@@ -148,30 +154,25 @@ def paginated_restaurant_search_requests(api_key, location, total):
   Construct the pagination requests for ALL the restaurants on Yelp for a given location.
 
   Args:
-    api_key (string): Your Yelp API Key for Authentication
+    api_key (string): Yelp API key for authentication
     location (string): Business Location
 
   Returns:
-    results (list): list of dicts representing each restaurant
+    results (list): list of dicts representing each restaurant in passed location
 """
 def all_restaurants(api_key, loc):
 
   # offset passed to get first page of restaurants in Yelp
-
   url, headers, url_params = get_url_params('/search', api_key, location = loc, offset = 0)
 
-  response = requests.get(url, params = url_params, headers = headers)
-  content_json = response.json()
-
+  # get results from request
+  content_json = api_get_request(url, headers, url_params)
   total_items = content_json["total"]
-
+  # get parameters needed to retrieve all restaurants in the given location
   restaurant_pages = paginated_restaurant_search_requests(api_key, loc, total_items)
 
-  # Use returned list of (url, headers, url_params) and function api_get_request
-  # to retrive all restaurants
-
+  # use returned list of (url, headers, url_params) and function api_get_request to retrive all restaurants
   result = []
-
   for i in range(len(restaurant_pages)):
     page = restaurant_pages[i]
 
@@ -179,27 +180,25 @@ def all_restaurants(api_key, loc):
     headers = page[1]
     url_params = page[2]
 
-    response = requests.get(url, params = url_params, headers = headers)
-    content_json = response.json()
+    # send request
+    content_json = api_get_request(url, headers, url_params)
     page_data = content_json['businesses']
 
     for j in range(len(page_data)):
       result.append(page_data[j])
 
-    # pause slightly after each request.
+    # pause slightly after each request to prevent timeout
     time.sleep(.3)
-
 
   return result
 
 
 
 """
-  Get the id of a business from the Yelp api
-  https://www.yelp.com/developers/documentation/v3/business_match
+  Get the ID of a business from the Yelp API (https://www.yelp.com/developers/documentation/v3/business_match)
 
   Args:
-    api_key(string): yelp api key
+    api_key(string): Yelp API key for authentication
     name(string): name of the business to access
     address(string): address of the business to access (can be empty if business has no address)
     city(string): city of the business to access
@@ -229,7 +228,7 @@ def get_business_id(api_key, name, address, city, state, country):
   Get three reviews from Yelp API
 
   Args:
-    api_key(string): yelp api key
+    api_key(string): Yelp API key for authentication
     name(string): name of the business to access
     address(string): address of the business to access (can be empty if business has no address)
     city(string): city of the business to access
@@ -240,9 +239,7 @@ def get_business_id(api_key, name, address, city, state, country):
     reviews(dict): reviews
     total(int): total number of reviews
     
-    or
-    
-    None if business is not found
+    or None if business is not found
 """
 def extract_reviews(api_key, name, address, city, state, country):
   business_id = get_business_id(api_key, name, address, city, state, country)
@@ -270,7 +267,7 @@ def extract_reviews(api_key, name, address, city, state, country):
   Parse Yelp API results to extract restaurant URLs.
 
   Args:
-    data (string): String of properly formatted JSON.
+    data (string): string of properly formatted JSON.
 
   Returns:
     (list): list of URLs as strings from the input JSON.
@@ -301,10 +298,12 @@ def parse_api_response(data):
 
 
 """
-  Parse the reviews on a single page of a restaurant.
+  Parse the reviews on a single page of a restaurant using BS4.
+  Created due to only being able access 3 reviews per restaurant from Yelp Fusion.
+  **No longer functional due to not being able to access yelp reviews html(??)**
 
   Args:
-    html (string): String of HTML corresponding to a Yelp restaurant
+    html (string): string of HTML corresponding to a Yelp restaurant
 
   Returns:
     tuple(list, string): a tuple of two elements
@@ -352,11 +351,11 @@ def parse_page(html):
 
 """
   Retrieve ALL of the reviews for a single restaurant on Yelp.
+  Created due to only being able access 3 reviews per restaurant from Yelp Fusion.
+  **No longer functional due to not being able to access yelp reviews html(??)**
 
   Parameters:
     url (string): Yelp URL corresponding to the restaurant of interest.
-    html_fetcher (function): A function that takes url and returns html status code and content
-
 
   Returns:
     reviews (list): list of dictionaries containing extracted review information
